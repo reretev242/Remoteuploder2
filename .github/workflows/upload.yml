@@ -1,0 +1,101 @@
+name: 🚀 1DM to MEGA Direct Uploader
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: '🔗 1DM se Copy kiya hua Link (.mp4 / .m3u8 / Page Link)'
+        required: true
+        type: string
+      file_name:
+        description: '🎬 Video ka Naam (Bina .mp4 lagaye, jaise: Movie_Part1)'
+        required: true
+        default: 'My_1DM_Video'
+        type: string
+      referer_url:
+        description: '🌐 Main Website Page Link (Optional - Agar 403 Error aaye tabhi daalein)'
+        required: false
+        type: string
+      mega_folder:
+        description: '📁 MEGA Cloud Folder Name'
+        required: true
+        default: '/1DM_Uploads'
+        type: string
+
+jobs:
+  download-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: 🛠️ Install Tools (yt-dlp, FFmpeg, Aria2c, MEGAcmd)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg aria2 curl wget
+          
+          # Latest yt-dlp install karein
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+          sudo chmod a+rx /usr/local/bin/yt-dlp
+          
+          # MEGAcmd install karein
+          wget https://mega.nz/linux/repo/xUbuntu_24.04/amd64/megacmd-xUbuntu_24.04_amd64.deb
+          sudo apt-get install -y ./megacmd-xUbuntu_24.04_amd64.deb || sudo apt-get install -f -y
+
+      - name: 📥 Download Video from 1DM Link
+        env:
+          VIDEO_URL: ${{ inputs.video_url }}
+          FILE_NAME: ${{ inputs.file_name }}
+          REFERER: ${{ inputs.referer_url }}
+        run: |
+          mkdir -p downloads
+          cd downloads
+          
+          echo "Downloading: $FILE_NAME ..."
+          
+          # User-Agent taaki server ko lage real mobile browser hai
+          UA="Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
+          
+          if [ -n "$REFERER" ]; then
+            yt-dlp "$VIDEO_URL" \
+              --user-agent "$UA" \
+              --referer "$REFERER" \
+              --downloader aria2c \
+              --downloader-args "aria2c:-x 16 -s 16 -k 1M" \
+              --merge-output-format mp4 \
+              --no-check-certificates \
+              -o "${FILE_NAME}.%(ext)s"
+          else
+            yt-dlp "$VIDEO_URL" \
+              --user-agent "$UA" \
+              --downloader aria2c \
+              --downloader-args "aria2c:-x 16 -s 16 -k 1M" \
+              --merge-output-format mp4 \
+              --no-check-certificates \
+              -o "${FILE_NAME}.%(ext)s"
+          fi
+          
+          echo "✅ Download Complete! File Details:"
+          ls -lh
+
+      - name: ☁️ Upload Directly to MEGA
+        env:
+          MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
+          MEGA_PASS: ${{ secrets.MEGA_PASSWORD }}
+          MEGA_DIR: ${{ inputs.mega_folder }}
+        run: |
+          echo "Logging into MEGA..."
+          mega-login "$MEGA_EMAIL" "$MEGA_PASS"
+          
+          # MEGA me folder banayein (agar pehle se nahi hai)
+          mega-mkdir -p "$MEGA_DIR"
+          
+          echo "Uploading file to MEGA ($MEGA_DIR)..."
+          for file in downloads/*; do
+            if [ -f "$file" ]; then
+              mega-put -c "$file" "$MEGA_DIR/"
+            fi
+          done
+          
+          echo "🎉 Successfully Uploaded to MEGA!"
+          mega-logout
+          
